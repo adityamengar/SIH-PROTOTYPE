@@ -61,7 +61,7 @@ Go to **https://app.turso.co** → sign in with GitHub:
 2. **Settings → API Tokens → Create Token** → copy the token (shown once)
 
 > The Turso CLI is deliberately *not* part of this flow. As of `turso-cli`
-> v1.0.32 the published binaries are macOS/Linux only — there is no Windows
+> v1.0.32 the published binaries are macOS/Linux only — there is no Windows.
 > build, and the docs tell Windows users to install WSL first. The
 > `turso_cli-installer.ps1` in the `tursodatabase/turso` repo installs
 > `tursodb.exe`, which is the *embedded* database and has no `db create`
@@ -139,10 +139,8 @@ hall, a missing key or a rate limit degrades gracefully instead of breaking.
 The UI tells you which source answered (`Verified by GeoApify` vs
 `Offline service-grid fallback in use`).
 
-When keys are present, real road distance and turn-by-turn duration replace the
-straight-line estimate in the matching engine, and the customer's booking flow
-gets type-ahead address search plus a working "use current location" (reverse
-geocoded to a named locality, not thrown away).
+When keys are present, real road distance and turn-by-turn duration replace the straight-line estimate in the matching engine, and the customer's booking flow gets type-ahead address search plus a working "use current location" (reverse geocoded to a named locality, not thrown away).
+
 
 ---
 
