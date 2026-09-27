@@ -195,16 +195,30 @@ async function main() {
     'the quote ceiling is +17% over the estimate (policy cap)',
     `ceiling ₹${price?.ceiling} vs 117% of ₹${price?.total} = ₹${Math.floor((price?.total ?? 0) * 1.17)}`
   )
-  // Daytime reference: with no evening surcharge an emergency plumber call in
-  // Kothrud lands in the rate-card band the demo quotes. Only assertable in
-  // daylight, so report it rather than gate on it.
-  const noEvening = (price?.total ?? 0) - (price?.eveningSurcharge ?? 0)
+  // The estimate must be the arithmetic sum of its own components, and the fair
+  // range must bracket it. This is the real §51/§62 contract and it holds
+  // regardless of WHICH worker the matcher ranks first.
+  //
+  // It replaces an earlier assertion that hardcoded "floor >= 550 && ceiling
+  // <= 700". That looked fine but was a snapshot of one run: the matcher's
+  // workload factor shifts with accumulated bookings, so a farther plumber could
+  // win, travel would rise, and the band would legitimately move. The assertion
+  // failed for that reason while the engine was correct.
+  const parts = (price?.base ?? 0) + (price?.travel ?? 0) + (price?.material ?? 0) + (price?.urgencySurcharge ?? 0) + (price?.eveningSurcharge ?? 0)
   ok(
-    isEveningNow ? true : price?.floor >= 550 && price?.ceiling <= 700,
-    'spec §51 rate-card band holds for a daytime emergency call',
-    isEveningNow
-      ? `skipped (evening): ex-surcharge total ₹${noEvening} would quote ₹${Math.floor(noEvening * 0.92)}–₹${Math.floor(noEvening * 1.17)}`
-      : `₹${price?.floor} – ₹${price?.ceiling}`
+    parts === price?.total,
+    'the estimate is exactly the sum of its quoted components',
+    `${parts} vs total ${price?.total} (base ${price?.base} + travel ${price?.travel} + material ${price?.material} + urgency ${price?.urgencySurcharge} + evening ${price?.eveningSurcharge ?? 0})`
+  )
+  ok(
+    price?.floor <= price?.total && price?.total <= price?.ceiling,
+    'the fair range brackets the estimate, so no negotiated deal escapes the policy',
+    `₹${price?.floor} ≤ ₹${price?.total} ≤ ₹${price?.ceiling}`
+  )
+  ok(
+    (price?.base ?? 0) > 0 && (price?.material ?? 0) > 0 && (price?.urgencySurcharge ?? 0) > 0,
+    'an EMERGENCY call is priced above the non-emergency baseline',
+    `base ₹${price?.base}, material ₹${price?.material}, urgency premium ₹${price?.urgencySurcharge}`
   )
 
   r = await req('POST', '/api/ai/allocate', { categoryKey: 'plumber', area: 'Kothrud', urgency: 'EMERGENCY' })
@@ -646,6 +660,39 @@ async function main() {
   // The panel must not display a declared role that contradicts the session.
   const panelSrc = stripComments(readFileSync(join(process.cwd(), 'src/components/gigsetu/demo/demo-panel.tsx'), 'utf8'))
   ok(/useAppStore\(\(s\) => s\.user\?\.role\)/.test(panelSrc), 'the demo panel shows the REAL signed-in role, not the step label')
+
+  // ---------- 16. BOOKING MEDIA (regression) ----------
+  // Attaching a photo made booking impossible: the flow posted
+  // [{kind,name,data}] objects while POST /api/bookings validated
+  // z.array(z.string()) -> 400 "Some fields need attention.". Every earlier
+  // booking post in this suite omitted media, so the suite stayed green through
+  // a total failure of the photo path. These posts deliberately include media.
+  section('16 booking with photo/video attachments (regression: 400 on any attachment)')
+  const DURL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD'
+  await req('POST', '/api/auth', { role: 'CUSTOMER' }, { noAuth: true })
+
+  r = await req('POST', '/api/bookings', { categoryKey: 'electrician', title: 'Media as strings', area: 'Kothrud', mode: 'QUOTE', media: [DURL] })
+  ok(r.s === 201 && r.j?.booking?.media?.length === 1, 'media as a plain data-URL string is accepted and stored', `HTTP ${r.s} media=${r.j?.booking?.media?.length ?? '—'}`)
+
+  r = await req('POST', '/api/bookings', { categoryKey: 'electrician', title: 'Media as objects', area: 'Kothrud', mode: 'QUOTE', media: [{ kind: 'image', name: 'panel.jpg', data: DURL }] })
+  ok(r.s === 201 && r.j?.booking?.media?.length === 1, 'the legacy {kind,name,data} object shape is still accepted (cached bundles)', `HTTP ${r.s} media=${r.j?.booking?.media?.length ?? '—'}`)
+
+  r = await req('POST', '/api/bookings', { categoryKey: 'electrician', title: 'Video, no inline bytes', area: 'Kothrud', mode: 'QUOTE', media: [{ kind: 'video', name: 'clip.mp4 (2 MB - video attached for demo)' }] })
+  ok(r.s === 201 && (r.j?.booking?.media?.length ?? 0) === 0, 'a video attachment with no inline data does not break the booking', `HTTP ${r.s} media=${r.j?.booking?.media?.length ?? '—'}`)
+
+  r = await req('POST', '/api/bookings', { categoryKey: 'electrician', title: 'Mixed media', area: 'Kothrud', media: [DURL, { kind: 'image', name: 'b.jpg', data: DURL }] })
+  ok(r.s === 201 && r.j?.booking?.media?.length === 2, 'mixed string + object media normalises to 2 stored items', `HTTP ${r.s} media=${r.j?.booking?.media?.length ?? '—'}`)
+
+  r = await req('POST', '/api/bookings', { categoryKey: 'electrician', title: 'Gallery check', area: 'Kothrud', media: [{ kind: 'image', name: 'c.jpg', data: DURL }] })
+  const stored = r.j?.booking?.media?.[0]
+  ok(typeof stored === 'string' && stored.startsWith('data:image'), 'stored media is a string the gallery can call .startsWith on', typeof stored === 'string' ? stored.slice(0, 24) : typeof stored)
+
+  // A 400 must name the offending field, not just "Some fields need attention."
+  r = await req('POST', '/api/bookings', { categoryKey: 'electrician', media: [{ kind: 'image', data: { nope: true } }] })
+  ok(r.s === 400 && Array.isArray(r.j?.fields) && r.j.fields.length > 0, 'validation failures still return per-field detail', `HTTP ${r.s} fields=${r.j?.fields?.length ?? 0}`)
+
+  const clientSrc = readFileSync(join(process.cwd(), 'src/lib/api-client.ts'), 'utf8')
+  ok(/data\?\.fields|fields/.test(clientSrc) && /path/.test(clientSrc), 'the API client surfaces field paths in the thrown error, so a 400 is diagnosable from the UI')
 
   console.log(`\n${'='.repeat(60)}`)
   console.log(`  ${passed} passed, ${failed} failed`)

@@ -10,12 +10,57 @@ import type { Urgency } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * Booking media attachment.
+ *
+ * FIX: this used to be `z.array(z.string())` while the booking flow posted
+ * `[{ kind, name, data }]` objects. Any customer who attached a photo therefore
+ * got "Some fields need attention." and could not create a booking at all —
+ * bookings with no media worked, which is why the acceptance suite never caught
+ * it (every one of its 145 booking posts omits media).
+ *
+ * Both shapes are accepted and normalised to plain data-URL strings, because
+ * that is what the rest of the app actually consumes: BookingDTO.media is
+ * `string[]`, and both the booking-detail gallery and the evidence card call
+ * `.startsWith('data:image')` on each entry.
+ *
+ * The object branch also protects users on a CACHED client bundle, who would
+ * otherwise keep hitting the 400 until they hard-refresh.
+ */
+const MediaItemSchema = z.union([
+  z.string().max(400_000),
+  z.object({
+    kind: z.enum(['image', 'video']).optional(),
+    name: z.string().max(200).optional(),
+    data: z.string().max(400_000).optional(),
+  }),
+])
+
+/** Reduce either accepted shape to the data-URL strings stored in mediaJson. */
+function normaliseMedia(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+  const out: string[] = []
+  for (const item of input.slice(0, 6)) {
+    if (typeof item === 'string') {
+      if (item.trim()) out.push(item)
+      continue
+    }
+    if (item && typeof item === 'object') {
+      const data = (item as { data?: unknown }).data
+      // A video attachment carries a name but no inline data (prototype: the
+      // bytes are not uploaded), so there is nothing persistable to store.
+      if (typeof data === 'string' && data.trim()) out.push(data)
+    }
+  }
+  return out
+}
+
 const CreateSchema = z.object({
   customerId: z.string().min(1).optional(),
   categoryKey: z.string().min(1).max(40),
   title: z.string().max(160).optional(),
   description: z.string().max(2000).optional(),
-  media: z.array(z.string().max(400_000)).max(6).optional(),
+  media: z.array(MediaItemSchema).max(6).optional(),
   area: z.string().min(1).max(120),
   address: z.string().max(400).optional(),
   scheduledAt: z.string().max(40).optional(),
@@ -149,7 +194,7 @@ export async function POST(req: NextRequest) {
         categoryKey: b.categoryKey,
         title: safeStr(b.title, 160, 'Service request') || 'Service request',
         description: safeStr(b.description, 2000),
-        mediaJson: JSON.stringify((b.media ?? []).slice(0, 6)),
+        mediaJson: JSON.stringify(normaliseMedia(b.media)),
         area: b.area,
         address: safeStr(b.address, 400, 'Address on file'),
         scheduledAt: when,

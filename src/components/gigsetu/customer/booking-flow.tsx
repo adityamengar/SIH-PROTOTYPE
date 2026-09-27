@@ -299,7 +299,12 @@ export function BookingFlow({
         categoryKey,
         title: (analysis?.title as string) ?? 'Service request',
         description,
-        media: media.map((m) => ({ kind: m.kind, name: m.name, data: m.kind === 'image' ? m.data : undefined })),
+        // Media is posted as plain data-URL strings, which is what the rest of the
+        // app consumes: BookingDTO.media is string[] and the booking gallery plus
+        // the evidence card both call .startsWith('data:image') on each entry.
+        // It previously posted {kind, name, data} objects, which the API schema
+        // rejected outright — attaching any photo made booking impossible.
+        media: media.filter((m) => m.kind === 'image' && m.data).map((m) => m.data),
         area: flowArea,
         address: address || 'Address on file',
         scheduledAt: scheduledAt(),

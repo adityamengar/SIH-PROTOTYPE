@@ -8,7 +8,18 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   })
   const data = await res.json()
-  if (!res.ok || data?.ok === false) throw new Error(data?.error ?? `Request failed: ${res.status}`)
+  if (!res.ok || data?.ok === false) {
+    // Surface WHICH field failed. A bare "Some fields need attention." makes a
+    // 400 undiagnosable from the UI — it is how a media shape mismatch
+    // (client sent objects, server expected strings) went unnoticed while
+    // every booking without a photo worked fine.
+    const fields = Array.isArray(data?.fields) ? data.fields as { path?: string; message?: string }[] : []
+    const detail = fields
+      .map((f) => (f.path ? `${f.path}: ${f.message ?? 'invalid'}` : (f.message ?? 'invalid')))
+      .slice(0, 3)
+      .join('; ')
+    throw new Error(detail ? `${data?.error ?? `Request failed: ${res.status}`} (${detail})` : (data?.error ?? `Request failed: ${res.status}`))
+  }
   return data as T
 }
 
