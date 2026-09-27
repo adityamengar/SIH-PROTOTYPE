@@ -12,6 +12,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { inr } from '@/lib/api-client'
 import { useDemoStore, DEMO_STEP_COUNT, DEMO_TOTAL_STORY_STEPS } from '@/store/demo-store'
+import { useAppStore } from '@/store/app-store'
 import { STATUS_LABELS } from '@/lib/types'
 import { VerifiedBadge, RatingStars, DemandBadge } from '../shared/ui-kit'
 import { resetDemoState, stopSihDemo } from './demo-launch'
@@ -362,6 +363,12 @@ export function DemoPanel() {
   const step = DEMO_SCRIPT[stepIndex]
   const consultOpen = useDemoStore((s) => s.consultOpen)
 
+  // The ACTUAL signed-in role, not the step's declared narrator role. A step can
+  // declare NATIONAL_ADMIN while the live session is still the CUSTOMER that a
+  // previous step left behind — which once hid a real 403 behind a reassuring
+  // label. Showing the truth makes that class of bug obvious on screen.
+  const realRole = useAppStore((s) => s.user?.role)
+
   // Highlights the current step's data-demo-target elements (spec §32).
   useDemoHighlight()
 
@@ -538,7 +545,15 @@ export function DemoPanel() {
           </div>
         </div>
         <div className="mt-1 flex items-center justify-between text-[10px] font-medium text-muted-foreground">
-          <span>Step {stepIndex + 1} / {DEMO_STEP_COUNT} · viewing as <span className="font-semibold text-foreground/80">{step?.role}</span></span>
+          <span>
+            Step {stepIndex + 1} / {DEMO_STEP_COUNT} · viewing as{' '}
+            <span className="font-semibold text-foreground/80">{realRole ?? step?.role}</span>
+            {realRole && step?.role && realRole !== step.role && (
+              <span className="ml-1 text-muted-foreground/80" title="Signed-in role differs from this step's declared narrator role">
+                (script: {step.role})
+              </span>
+            )}
+          </span>
           <span className="tabular-nums">{step?.short}</span>
         </div>
 

@@ -584,6 +584,69 @@ async function main() {
   const storeSrc = readFileSync(join(process.cwd(), 'src/store/demo-store.ts'), 'utf8')
   ok(/DEMO_STEP_COUNT\s*=\s*DEMO_RUN_LENGTH/.test(storeSrc), 'the store derives its step count from the script (single source of truth)')
 
+  // ---------- 15b. GOVERNANCE GATE FOR THE EXCHANGE (regression) ----------
+  // The demo's step 17 (Cooperative Service Exchange) hit a hard 403 and
+  // stopped the recording: it created/approved the recommendation while the live
+  // session was still the CUSTOMER left behind by the matching step, and the
+  // panel helpfully displayed the step's DECLARED role (NATIONAL_ADMIN) rather
+  // than the real one. The endpoint gate is correct and stays — the demo has to
+  // authorise itself. These assertions pin both halves of that.
+  section('15b exchange governance gate (regression: step 17 hard-stopped on 403)')
+  await req('POST', '/api/auth', { role: 'CUSTOMER' }, { noAuth: true })
+  let g = await req('POST', '/api/exchange', {
+    skill: 'plumber',
+    fromCoopName: 'Gate Probe Cooperative A',
+    toCoopName: 'Gate Probe Cooperative B',
+    districtName: 'Pune',
+    workerCount: 2,
+    durationDays: 3,
+    rationale: 'Gate probe — must be rejected while signed in as a customer.',
+  })
+  ok(g.s === 403, 'a CUSTOMER cannot create a cross-cooperative transfer', `status=${g.s} ${g.j?.error ?? ''}`)
+
+  // …and the SAME request succeeds once a governance officer is signed in.
+  // This is exactly the transition the demo engine now performs in step 17.
+  await req('POST', '/api/auth', { role: 'DISTRICT_COORD' }, { noAuth: true })
+  g = await req('POST', '/api/exchange', {
+    skill: 'plumber',
+    fromCoopName: 'Gate Probe Cooperative A',
+    toCoopName: 'Gate Probe Cooperative B',
+    districtName: 'Pune',
+    workerCount: 2,
+    durationDays: 3,
+    rationale: 'Gate probe — must be allowed for a governance officer.',
+  })
+  ok(
+    g.s !== 403 && g.s !== 401,
+    '…the same request is no longer REJECTED BY THE ROLE GATE',
+    `HTTP ${g.s}${g.j?.error ? ` (${g.j.error})` : ''}`
+  )
+  ok(
+    /must exist/i.test(g.j?.error ?? ''),
+    '…and is instead validated on its merits (both cooperatives must exist)',
+    g.j?.error ?? `HTTP ${g.s}`
+  )
+  ok(
+    /one of/i.test(String(await req('GET', '/api/session').then((x) => x.j?.user?.role)) ?? '') === false,
+    '…and the session is genuinely DISTRICT_COORD now',
+    String((await req('GET', '/api/session')).j?.user?.role)
+  )
+
+  // The demo must sign in before mutating. Assert the engine does it.
+  const engineForGate = stripComments(readFileSync(join(process.cwd(), 'src/components/gigsetu/demo/demo-engine.tsx'), 'utf8'))
+  const governanceCalls = [...engineForGate.matchAll(/ensureGovernanceRole\('([A-Z_]+)'\)/g)].map((m) => m[1])
+  ok(governanceCalls.length > 0, 'the demo engine signs into a governance role before exchange mutations', `roles: ${[...new Set(governanceCalls)].join(', ')}`)
+  const workforceBlock = engineForGate.split("case 'workforce-intelligence'")[1]?.split("case 'platform-admin'")[0] ?? ''
+  ok(
+    /ensureGovernanceRole\(/.test(workforceBlock),
+    '…specifically inside step 17, BEFORE the approve call',
+    workforceBlock.indexOf('ensureGovernanceRole(') < workforceBlock.indexOf("action: 'approve'") ? 'authorise-then-approve' : 'ORDER IS WRONG'
+  )
+
+  // The panel must not display a declared role that contradicts the session.
+  const panelSrc = stripComments(readFileSync(join(process.cwd(), 'src/components/gigsetu/demo/demo-panel.tsx'), 'utf8'))
+  ok(/useAppStore\(\(s\) => s\.user\?\.role\)/.test(panelSrc), 'the demo panel shows the REAL signed-in role, not the step label')
+
   console.log(`\n${'='.repeat(60)}`)
   console.log(`  ${passed} passed, ${failed} failed`)
   console.log('='.repeat(60))

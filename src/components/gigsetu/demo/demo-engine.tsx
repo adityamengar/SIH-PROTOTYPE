@@ -6,7 +6,7 @@ import { api, signInAs } from '@/lib/api-client'
 import { areaDistance } from '@/lib/area-distance'
 import { useAppStore } from '@/store/app-store'
 import { useDemoStore, DEMO_STEP_COUNT } from '@/store/demo-store'
-import type { BookingDTO, DemoUser, MatchResponse, WaBotResponse } from '@/lib/types'
+import type { BookingDTO, DemoUser, MatchResponse, Role, WaBotResponse } from '@/lib/types'
 import {
   DEMO_SCRIPT,
   DEMO_AREA,
@@ -244,6 +244,27 @@ export function DemoEngine() {
     },
     []
   )
+
+  /**
+   * Sign in as a governance officer before any exchange mutation.
+   *
+   * The Cooperative Service Exchange is a HUMAN-governed action: creating and
+   * approving a cross-cooperative transfer requires COOP_ADMIN, TALUKA_COORD,
+   * DISTRICT_COORD, STATE_ADMIN, NATIONAL_ADMIN or PLATFORM_ADMIN. A worker or
+   * customer must NOT be able to approve one — that gate is deliberate and
+   * correct, so the demo has to step into an authorised role rather than
+   * weaken the check.
+   *
+   * Step 17 previously called ensureWorkerIdentity() (which inherits the
+   * CUSTOMER session from ensureMatch) and then tried to approve, which 403'd
+   * and hard-stopped the demo mid-recording.
+   */
+  const ensureGovernanceRole = useCallback(async (role: Role = 'DISTRICT_COORD'): Promise<DemoUser> => {
+    const res = await signInAs<{ ok: boolean; user: DemoUser }>(role)
+    if (!res.user) throw new Error(`${role} demo identity unavailable. Run: npm run db:seed`)
+    useAppStore.getState().login(res.user)
+    return res.user
+  }, [])
 
   const getBooking = useCallback(async (id: string): Promise<BookingDTO> => {
     const res = await api.get<{ ok: boolean; booking: BookingDTO }>(`/api/bookings/${id}`)
@@ -605,6 +626,11 @@ export function DemoEngine() {
         case 'workforce-intelligence': {
           const { coopName } = await ensureWorkerIdentity()
 
+          // Step into a governance role BEFORE any exchange mutation. The
+          // approve gate is intentional; the demo must authorise itself rather
+          // than the endpoint being relaxed.
+          await ensureGovernanceRole('DISTRICT_COORD')
+
           // ---- 17A: capacity exchange, recommended then human-approved ----
           useDemoStore.getState().setSubScene(0)
           useAppStore.getState().setView('exchange')
@@ -729,7 +755,7 @@ export function DemoEngine() {
       }
 
     },
-    [ensureBooking, ensureCustomer, ensureMatch, ensureReadyWaState, ensureWorkerIdentity, getBooking, pollBooking, qc]
+    [ensureBooking, ensureCustomer, ensureGovernanceRole, ensureMatch, ensureReadyWaState, ensureWorkerIdentity, getBooking, pollBooking, qc]
   )
 
   // ---- engine effect: execute the current step whenever it becomes due ----
