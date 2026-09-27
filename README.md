@@ -7,6 +7,9 @@ A Smart India Hackathon prototype that models the full cooperative workforce eco
 Everything runs on **one Next.js route (`/`) + an API layer (`/api/*`) + one shared SQLite database** — every role looks at the same live data, so a booking created by the customer immediately appears on the worker's phone, the cooperative's register, the district dashboard and the audit trail.
 
 ---
+## Prototype Has Been Deployed To Vercel
+If You Want A Quick View How The Prototype Actually Works (DEMO MODE SUPPORTED) You Can View It On :
+https://sih-prototype-self.vercel.app/
 
 ## Quickstart
 
