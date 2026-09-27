@@ -296,25 +296,29 @@ export function PlatformAdmin({ user }: { user: DemoUser }) {
           )}
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <SectionCard title={t('paTrendBookings', lang)} description={admin?.note}>
-              {adminQ.isLoading ? (
-                <Skeleton className="h-40 rounded-lg" />
-              ) : (
-                <>
-                  <BarChartMini data={admin?.bookingsByDay.map((d) => ({ label: d.label, value: d.count })) ?? []} />
-                  <SparkLine points={admin?.bookingsByDay.map((d) => d.count) ?? []} className="mt-2" height={34} />
-                </>
-              )}
-            </SectionCard>
-            <SectionCard title={t('paByStatus', lang)}>
-              {adminQ.isLoading ? (
-                <Skeleton className="h-40 rounded-lg" />
-              ) : (
-                <DonutMini
-                  data={(admin?.bookingsByStatus ?? []).map((s) => ({ label: s.status.replace(/_/g, ' '), value: s.count, color: STATUS_COLOR[s.status] }))}
-                />
-              )}
-            </SectionCard>
+            <div data-demo-target="platform-bookings">
+              <SectionCard title={t('paTrendBookings', lang)} description={admin?.note}>
+                {adminQ.isLoading ? (
+                  <Skeleton className="h-40 rounded-lg" />
+                ) : (
+                  <>
+                    <BarChartMini data={admin?.bookingsByDay.map((d) => ({ label: d.label, value: d.count })) ?? []} />
+                    <SparkLine points={admin?.bookingsByDay.map((d) => d.count) ?? []} className="mt-2" height={34} />
+                  </>
+                )}
+              </SectionCard>
+            </div>
+            <div data-demo-target="platform-bookings">
+              <SectionCard title={t('paByStatus', lang)}>
+                {adminQ.isLoading ? (
+                  <Skeleton className="h-40 rounded-lg" />
+                ) : (
+                  <DonutMini
+                    data={(admin?.bookingsByStatus ?? []).map((s) => ({ label: s.status.replace(/_/g, ' '), value: s.count, color: STATUS_COLOR[s.status] }))}
+                  />
+                )}
+              </SectionCard>
+            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

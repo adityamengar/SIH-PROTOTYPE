@@ -176,19 +176,21 @@ export function NationalDashboard({ user }: { user: import('@/lib/types').DemoUs
 
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <SectionCard title="Workers by state" description="registered cooperative workers in the apex network">
-          <div className="h-64 w-full sm:h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={states.map((s) => ({ name: abbreviate(s.state), Workers: s.workers }))} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-                <XAxis dataKey="name" tick={axisTick} interval={0} angle={-18} textAnchor="end" height={46} tickLine={false} axisLine={false} />
-                <YAxis tick={axisTick} tickLine={false} axisLine={false} width={48} />
-                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--color-muted)', opacity: 0.5 }} />
-                <Bar dataKey="Workers" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={44} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </SectionCard>
+        <div data-demo-target="national-workers-card">
+          <SectionCard title="Workers by state" description="registered cooperative workers in the apex network">
+            <div className="h-64 w-full sm:h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={states.map((s) => ({ name: abbreviate(s.state), Workers: s.workers }))} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                  <XAxis dataKey="name" tick={axisTick} interval={0} angle={-18} textAnchor="end" height={46} tickLine={false} axisLine={false} />
+                  <YAxis tick={axisTick} tickLine={false} axisLine={false} width={48} />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--color-muted)', opacity: 0.5 }} />
+                  <Bar dataKey="Workers" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={44} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </SectionCard>
+        </div>
 
         <SectionCard title="Cooperatives by state" description="share of primary societies per state">
           <div className="h-64 w-full sm:h-72">

@@ -281,6 +281,7 @@ export function TalukaDashboard({ user, focusId }: { user: DemoUser; focusId?: s
       </section>
 
       {/* Demand by category */}
+      <div data-demo-target="taluka-workers-card">
       <SectionCard
         title="Demand by service category"
         description="Aggregated taluka-level demand signal per skill, from today's booking flow"
@@ -296,6 +297,7 @@ export function TalukaDashboard({ user, focusId }: { user: DemoUser; focusId?: s
           ))}
         </div>
       </SectionCard>
+      </div>
 
       {/* Zone heatmap */}
       <SectionCard

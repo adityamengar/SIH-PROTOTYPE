@@ -220,9 +220,11 @@ export function ServiceExchange({ user }: { user: DemoUser }) {
         />
       ) : (
         <div className="space-y-3">
-          {sorted.map((rec) => (
-            <RecCard key={rec.id} rec={rec} canApprove={canApprove} onReview={setReviewing} />
-          ))}
+          <div data-demo-target="exchange-recommendations">
+            {sorted.map((rec) => (
+              <RecCard key={rec.id} rec={rec} canApprove={canApprove} onReview={setReviewing} />
+            ))}
+          </div>
         </div>
       )}
 

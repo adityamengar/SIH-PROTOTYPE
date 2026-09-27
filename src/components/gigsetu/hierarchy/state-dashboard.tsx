@@ -213,17 +213,19 @@ export function StateDashboard({ user }: { user: import('@/lib/types').DemoUser 
 
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <SectionCard title="Workers by district" description="registered cooperative workers (abbreviated names)">
-          <ChartShell>
-            <BarChart data={byWorkers.map((d) => ({ name: abbreviate(d.name), Workers: d.workers }))} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-              <XAxis dataKey="name" tick={axisTick} interval={0} tickLine={false} axisLine={false} />
-              <YAxis tick={axisTick} tickLine={false} axisLine={false} width={44} />
-              <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--color-muted)', opacity: 0.5 }} />
-              <Bar dataKey="Workers" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={44} />
-            </BarChart>
-          </ChartShell>
-        </SectionCard>
+        <div data-demo-target="state-workers-card">
+          <SectionCard title="Workers by district" description="registered cooperative workers (abbreviated names)">
+            <ChartShell>
+              <BarChart data={byWorkers.map((d) => ({ name: abbreviate(d.name), Workers: d.workers }))} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                <XAxis dataKey="name" tick={axisTick} interval={0} tickLine={false} axisLine={false} />
+                <YAxis tick={axisTick} tickLine={false} axisLine={false} width={44} />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--color-muted)', opacity: 0.5 }} />
+                <Bar dataKey="Workers" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={44} />
+              </BarChart>
+            </ChartShell>
+          </SectionCard>
+        </div>
 
         <SectionCard title="Jobs today by district" description="live bookings flowing through the federation">
           <ChartShell>

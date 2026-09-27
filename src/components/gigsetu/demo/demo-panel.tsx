@@ -11,11 +11,15 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { inr } from '@/lib/api-client'
-import { useDemoStore, DEMO_STEP_COUNT } from '@/store/demo-store'
+import { useDemoStore, DEMO_STEP_COUNT, DEMO_TOTAL_STORY_STEPS } from '@/store/demo-store'
 import { STATUS_LABELS } from '@/lib/types'
 import { VerifiedBadge, RatingStars, DemandBadge } from '../shared/ui-kit'
 import { resetDemoState, stopSihDemo } from './demo-launch'
-import { DEMO_SCRIPT, type DemoData } from './demo-script'
+import { DEMO_SCRIPT, DEMO_SCENARIO, DEMO_GOVERNANCE, DEMO_SCENARIO_ENTITIES, type DemoData } from './demo-script'
+import { DemoStoryHeader } from './demo-story-header'
+import { DemoFeatureCard } from './demo-feature-card'
+import { DemoVideoCall } from './demo-video-call'
+import { useDemoHighlight, clearDemoHighlights } from './demo-highlight'
 import {
   Play, Pause, ChevronLeft, ChevronRight, X, Monitor, RotateCcw, ShieldCheck, Info,
   Star, TrendingUp, ArrowRight, CheckCircle2, Clock,
@@ -356,6 +360,16 @@ export function DemoPanel() {
   const { toast } = useToast()
 
   const step = DEMO_SCRIPT[stepIndex]
+  const consultOpen = useDemoStore((s) => s.consultOpen)
+
+  // Highlights the current step's data-demo-target elements (spec §32).
+  useDemoHighlight()
+
+  // A stopped demo must leave no orange outlines behind (spec §41).
+  useEffect(() => {
+    if (!active) clearDemoHighlights()
+  }, [active])
+
   const narration = useMemo(() => {
     try {
       return step?.narration(data) ?? ''
@@ -386,19 +400,28 @@ export function DemoPanel() {
     }
   }
 
-  // Keyboard controls — never hijack typing
+  // Keyboard controls — never hijack typing (spec §36)
   useEffect(() => {
     if (!active) return
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'ArrowRight' || e.key === ' ') {
+      if (e.key === 'ArrowRight') {
         e.preventDefault()
         advance()
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         useDemoStore.getState().prev()
+      } else if (e.key === ' ') {
+        e.preventDefault()
+        useDemoStore.getState().togglePlay()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        stopSihDemo()
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault()
+        void doReset()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -411,12 +434,27 @@ export function DemoPanel() {
   const isError = phase === 'error'
 
   return (
-    <section
-      aria-label="SIH Demo Mode control panel"
-      className="fixed inset-x-3 bottom-3 z-50 w-[calc(100%-1.5rem)] rounded-2xl border bg-card/95 shadow-2xl backdrop-blur sm:inset-x-auto sm:left-1/2 sm:w-[700px] sm:-translate-x-1/2"
-      style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
-    >
-      <div className="p-3 sm:p-4 sm:pb-1">
+    <>
+      {/* ---- DEMO STORY HEADER (spec §02 / §29) ----
+          Sits directly above the control bar so the application screen stays
+          the main visual focus. Driven entirely by the step in the centralized
+          script — no timing or copy lives here. */}
+      <DemoStoryHeader
+        currentStep={step?.num ?? stepIndex + 1}
+        totalSteps={DEMO_TOTAL_STORY_STEPS}
+        scenario={DEMO_SCENARIO}
+        title={step?.title ?? ''}
+        description={step?.description ?? ''}
+        supporting={step?.num === null}
+        active={!isError}
+      />
+
+      <section
+        aria-label="SIH Demo Mode control panel"
+        className="fixed inset-x-3 bottom-3 z-50 w-[calc(100%-1.5rem)] rounded-2xl border bg-card/95 shadow-2xl backdrop-blur sm:inset-x-auto sm:left-1/2 sm:w-[700px] sm:-translate-x-1/2"
+        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+      >
+        <div className="p-3 sm:p-4 sm:pb-1">
         {/* header row */}
         <div className="flex items-center gap-2">
           <Badge className="gap-1.5 border-red-200 bg-red-600 px-2 text-[10px] font-bold tracking-wide text-white hover:bg-red-600 dark:border-red-800">
@@ -427,7 +465,7 @@ export function DemoPanel() {
             SIH DEMO MODE
           </Badge>
           <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground/90">
-            Emergency Plumbing Request — मराठी WhatsApp → full cooperative loop
+            {DEMO_SCENARIO} — full cooperative workforce loop
           </p>
           <Popover>
             <PopoverTrigger asChild>
@@ -436,13 +474,15 @@ export function DemoPanel() {
               </Button>
             </PopoverTrigger>
             <PopoverContent side="top" align="end" className="max-h-80 w-80 overflow-y-auto p-3">
-              <p className="text-xs font-bold">The 16-step golden path</p>
+              <p className="text-xs font-bold">The {DEMO_TOTAL_STORY_STEPS}-step story</p>
               <ol className="mt-2 space-y-1.5">
                 {DEMO_SCRIPT.map((s, i) => (
                   <li key={s.id} className="flex gap-2 text-[11px] leading-snug">
-                    <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold', i <= stepIndex ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>{s.num}</span>
+                    <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold', i <= stepIndex ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>
+                      {s.num ?? '•'}
+                    </span>
                     <span className={cn(i <= stepIndex ? 'text-foreground' : 'text-muted-foreground')}>
-                      <span className="font-semibold">{s.short}</span> — {s.role}
+                      <span className="font-semibold">{s.title}</span> — {s.role}
                     </span>
                   </li>
                 ))}
@@ -455,24 +495,47 @@ export function DemoPanel() {
           </Button>
         </div>
 
-        {/* progress ticks */}
-        <div className="mt-2.5 flex items-center gap-1" role="tablist" aria-label="Demo steps progress">
-          {DEMO_SCRIPT.map((s, i) => (
-            <button
-              key={s.id}
-              role="tab"
-              aria-selected={i === stepIndex}
-              aria-label={`Step ${s.num}: ${s.short}`}
-              title={`Step ${s.num}: ${s.short}`}
-              onClick={() => useDemoStore.getState().goTo(i)}
-              className={cn(
-                'h-1.5 flex-1 rounded-full transition-colors',
-                i < stepIndex ? 'bg-primary' : i === stepIndex ? 'bg-primary/80' : 'bg-muted hover:bg-muted-foreground/30'
-              )}
-            >
-              {i === stepIndex && !isDone && <span className="block h-1.5 flex-1 animate-pulse rounded-full bg-primary" />}
-            </button>
-          ))}
+        {/* Compact labelled progress (spec §30): orange = active, green =
+            completed, grey = upcoming. Ticks carry short labels so the viewer can
+            see where they are without a legend. */}
+        <div className="mt-2.5" role="tablist" aria-label="Demo story progress">
+          <div className="flex items-center gap-0.5">
+            {DEMO_SCRIPT.map((s, i) => (
+              <button
+                key={s.id}
+                role="tab"
+                aria-selected={i === stepIndex}
+                aria-label={s.num === null ? `Scene: ${s.short}` : `Step ${s.num} of ${DEMO_TOTAL_STORY_STEPS}: ${s.short}`}
+                title={s.num === null ? s.title : `${String(s.num).padStart(2, '0')} — ${s.title}`}
+                onClick={() => useDemoStore.getState().goTo(i)}
+                className={cn(
+                  'h-1.5 flex-1 rounded-full transition-colors',
+                  i < stepIndex
+                    ? 'bg-emerald-500'
+                    : i === stepIndex
+                      ? 'bg-primary'
+                      : 'bg-muted hover:bg-muted-foreground/30'
+                )}
+              />
+            ))}
+          </div>
+          <div className="mt-1 flex items-center gap-0.5 text-[8px] font-semibold uppercase tracking-tighter">
+            {DEMO_SCRIPT.map((s, i) => (
+              <span
+                key={s.id}
+                className={cn(
+                  'min-w-0 flex-1 truncate text-center leading-none',
+                  i < stepIndex
+                    ? 'text-emerald-600 dark:text-emerald-500'
+                    : i === stepIndex
+                      ? 'text-primary'
+                      : 'text-muted-foreground/60'
+                )}
+              >
+                {s.short}
+              </span>
+            ))}
+          </div>
         </div>
         <div className="mt-1 flex items-center justify-between text-[10px] font-medium text-muted-foreground">
           <span>Step {stepIndex + 1} / {DEMO_STEP_COUNT} · viewing as <span className="font-semibold text-foreground/80">{step?.role}</span></span>
@@ -568,6 +631,31 @@ export function DemoPanel() {
         <ShieldCheck className="h-3 w-3 text-emerald-600" aria-hidden />
         Scripted demo drives real APIs — every booking, payment and rating is genuine prototype data.
       </div>
-    </section>
+      </section>
+
+      {/* ---- FEATURE EXPLANATION CARD (spec §31) ----
+          One heading + one sentence, pinned bottom-right so it never covers the
+          application content it describes. */}
+      <DemoFeatureCard
+        heading={step?.title ?? ''}
+        sentence={step?.voiceover ?? ''}
+        footer={step && (step.display === 'exchange' || step.display === 'worker' || step.display === 'loop') ? DEMO_GOVERNANCE : undefined}
+        visible={!isDone && !isError && !!step}
+      />
+      {/* ---- REMOTE CONSULTATION OVERLAY (spec §11 / §33) ----
+          Deterministic simulation: no getUserMedia, no microphone, no WebRTC,
+          no external API. Rendered above everything and self-terminating. */}
+      {consultOpen && (
+        <DemoVideoCall
+          customer={DEMO_SCENARIO_ENTITIES.customer}
+          worker={(data.workerName as string) ?? 'Matched worker'}
+          service={DEMO_SCENARIO_ENTITIES.service}
+          location={DEMO_SCENARIO_ENTITIES.location}
+          duration={9000}
+          autoPlay
+          onEnd={() => useDemoStore.getState().setConsultOpen(false)}
+        />
+      )}
+      </>
   )
 }

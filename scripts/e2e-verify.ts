@@ -9,6 +9,9 @@ export {}
  *   npm run dev -- -p 3111     # or any port; update B below
  *   node scripts/e2e-verify.ts
  */
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
 const B = process.env.GIGSETU_BASE_URL || 'http://localhost:3111'
 const MARATHI = 'माझ्या घरात पाण्याची पाइप फुटली आहे. तातडीने plumber पाहिजे.'
 
@@ -501,6 +504,85 @@ async function main() {
 
   const demoAfter = await req('GET', `/api/bookings/${DBOOK}`)
   ok(demoAfter.j?.booking?.refCode === DREF, 'walkthrough booking is queryable end-to-end', `${demoAfter.j?.booking?.refCode} ${demoAfter.j?.booking?.status}`)
+
+  // ---------- 15. SIH DEMO SCRIPT INTEGRITY ----------
+  // The demo is a screen-recorded product walkthrough, so a broken script is a
+  // broken demo. These assertions are about the SCRIPT, not the API: they run
+  // with no server dependency and guard the acceptance list in the brief.
+  section('15 SIH demo script integrity (17-step story, spec §46)')
+  const scriptSrc = readFileSync(join(process.cwd(), 'src/components/gigsetu/demo/demo-script.ts'), 'utf8')
+
+  const numbered = [...scriptSrc.matchAll(/num:\s*(\d+)\s*,\s*title:\s*'([^']+)'/g)].map((m) => ({ num: Number(m[1]), title: m[2] }))
+  ok(numbered.length === 17, 'the script defines exactly 17 numbered story steps', `found ${numbered.length}`)
+  ok(
+    numbered.every((s, i) => i === 0 || s.num === numbered[i - 1].num + 1),
+    'story step numbers run 01..17 with no gaps or duplicates',
+    numbered.map((s) => s.num).join(',')
+  )
+  const titles = numbered.map((s) => s.title)
+  const REQUIRED_TITLES = [
+    'CUSTOMER REQUEST', 'MULTILINGUAL REQUEST', 'AI UNDERSTANDS', 'WORKER DISCOVERY',
+    'FAIR MATCHING', 'REMOTE CONSULTATION', 'WORKER ACCEPTS', 'SERVICE TRACKING',
+    'SERVICE COMPLETED', 'PAYMENT + FAIRWORK', 'COOPERATIVE DASHBOARD', 'TALUKA COORDINATION',
+    'DISTRICT COMMAND', 'STATE FEDERATION', 'NATIONAL APEX', 'INSTITUTIONAL SERVICES',
+    'WORKFORCE INTELLIGENCE',
+  ]
+  const missingTitles = REQUIRED_TITLES.filter((t) => !titles.includes(t))
+  ok(missingTitles.length === 0, 'every required story title from the brief is present', missingTitles.join(', ') || 'all 17')
+
+  // Supporting scenes must be unnumbered (spec §24 — platform admin is NOT a
+  // numbered step).
+  const supporting = [...scriptSrc.matchAll(/id:\s*'([a-z-]+)',\s*num:\s*null/g)].map((m) => m[1])
+  ok(supporting.includes('platform-admin'), 'Platform Admin exists as an UNNUMBERED supporting scene', supporting.join(', '))
+  ok(supporting.includes('intelligence-loop'), 'the Complete Intelligence Loop scene exists')
+  ok(supporting.includes('closing'), 'the closing scene exists')
+
+  // The three-layer information system (spec §44): every step needs a
+  // description AND a voiceover line, or the viewer loses "why it matters".
+  const stepBlocks = scriptSrc.split(/\n  \{\n/).slice(1)
+  const noDescription = stepBlocks.filter((b) => !/\bdescription:/.test(b)).length
+  const noVoiceover = stepBlocks.filter((b) => !/\bvoiceover:/.test(b)).length
+  ok(noDescription === 0, 'every step declares a one-line description (LEVEL 1/3)', `${noDescription} missing`)
+  ok(noVoiceover === 0, 'every step declares voiceoverText for later narration (spec §34)', `${noVoiceover} missing`)
+
+  // Governance framing must be present wherever AI acts (spec §10 / §25).
+  ok(scriptSrc.includes('DEMO_GOVERNANCE'), 'the "AI RECOMMENDS · COOPERATIVE GOVERNS" line is defined')
+  ok(
+    scriptSrc.includes("'AI RECOMMENDS · COOPERATIVE GOVERNS'"),
+    '…and is spelled exactly as the brief requires'
+  )
+
+  // Deterministic remote consultation: no camera, no mic, no WebRTC (spec §11).
+  // Comments are stripped first — the file's own docblock NAMES these APIs to
+  // state that they are deliberately not used, which would otherwise match.
+  const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+  const callSrc = stripComments(readFileSync(join(process.cwd(), 'src/components/gigsetu/demo/demo-video-call.tsx'), 'utf8'))
+  ok(!/getUserMedia|mediaDevices|RTCPeerConnection|webkitGetUserMedia/.test(callSrc), 'the video consultation uses NO real camera/mic/WebRTC API')
+  ok(/CALLING[\s\S]*CONNECTING[\s\S]*CONNECTED[\s\S]*CONSULTATION[\s\S]*SUMMARY[\s\S]*END/.test(callSrc), 'the consultation runs CALLING → END deterministically')
+
+  // No coordinate-based automation anywhere (spec §42).
+  const demoDir = join(process.cwd(), 'src/components/gigsetu/demo')
+  const coordClicks: string[] = []
+  for (const f of readdirSync(demoDir)) {
+    if (!f.endsWith('.tsx') && !f.endsWith('.ts')) continue
+    const src = readFileSync(join(demoDir, f), 'utf8')
+    if (/clientX|clientY|pageX|pageY|dispatchEvent\(new MouseEvent|Math\.random\(\s*\)\s*\*\s*\d{2,}/.test(src)) {
+      coordClicks.push(f)
+    }
+  }
+  ok(coordClicks.length === 0, 'no coordinate-based or randomised click automation in the demo', coordClicks.join(', ') || 'clean')
+
+  // The engine must handle every step — enforced at compile time, asserted here
+  // so it is also visible in the acceptance report.
+  const engineSrc = readFileSync(join(process.cwd(), 'src/components/gigsetu/demo/demo-engine.tsx'), 'utf8')
+  const handled = new Set([...engineSrc.matchAll(/case '([a-z-]+)':/g)].map((m) => m[1]))
+  const scriptIds = [...scriptSrc.matchAll(/^\s{4}id: '([a-z-]+)',\s*$/gm)].map((m) => m[1])
+  const unhandled = scriptIds.filter((id) => !handled.has(id))
+  ok(unhandled.length === 0, 'the demo engine has an action for every story step', unhandled.join(', ') || `${scriptIds.length} steps`)
+
+  // Store step count must match the script, or progress/Next would misbehave.
+  const storeSrc = readFileSync(join(process.cwd(), 'src/store/demo-store.ts'), 'utf8')
+  ok(/DEMO_STEP_COUNT\s*=\s*DEMO_RUN_LENGTH/.test(storeSrc), 'the store derives its step count from the script (single source of truth)')
 
   console.log(`\n${'='.repeat(60)}`)
   console.log(`  ${passed} passed, ${failed} failed`)

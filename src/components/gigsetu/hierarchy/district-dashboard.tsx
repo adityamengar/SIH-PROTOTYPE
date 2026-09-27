@@ -368,6 +368,7 @@ export function DistrictDashboard({ user, focusId }: { user: DemoUser; focusId?:
       </section>
 
       {/* Demand by skill */}
+      <div data-demo-target="district-demand-by-skill">
       <SectionCard
         title="District demand by skill"
         description="Aggregated demand signal across the district, from today's booking flow"
@@ -383,6 +384,7 @@ export function DistrictDashboard({ user, focusId }: { user: DemoUser; focusId?:
           ))}
         </div>
       </SectionCard>
+      </div>
 
       {/* Schematic taluka demand map */}
       <SectionCard

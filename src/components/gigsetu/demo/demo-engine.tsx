@@ -7,7 +7,50 @@ import { areaDistance } from '@/lib/area-distance'
 import { useAppStore } from '@/store/app-store'
 import { useDemoStore, DEMO_STEP_COUNT } from '@/store/demo-store'
 import type { BookingDTO, DemoUser, MatchResponse, WaBotResponse } from '@/lib/types'
-import { DEMO_SCRIPT, DEMO_AREA, DEMO_WA_MESSAGE, EMERGENCY_PIPELINE_NOTES, type DemoData } from './demo-script'
+import {
+  DEMO_SCRIPT,
+  DEMO_AREA,
+  DEMO_WA_MESSAGE,
+  DEMO_RATING,
+  DEMO_GOVERNANCE,
+  DEMO_SCENARIO_ENTITIES,
+  EMERGENCY_PIPELINE_NOTES,
+  type DemoData,
+  type DemoStepId,
+} from './demo-script'
+
+/**
+ * Every step id the engine's switch below actually handles, as a const tuple.
+ *
+ * HANDLED_EXHAUSTIVE below turns this into a COMPILE-TIME proof that the
+ * engine covers every step in the script. Ten new steps once compiled cleanly
+ * and silently did nothing at runtime, in front of a judge; this makes that a
+ * `npm run typecheck` failure instead.
+ *
+ * Note this must be a const TUPLE, not a union type cast — `id as Union` is
+ * permitted by TypeScript and therefore proves nothing.
+ */
+const HANDLED_STEP_IDS = [
+  'customer-request', 'wa-request', 'ai-understand',
+  'match-search', 'match-select', 'remote-consult',
+  'confirm', 'on-the-way', 'complete', 'payment',
+  'coop-update', 'taluka-capacity', 'district-demand',
+  'state-network', 'national-apex', 'institution-amc',
+  'workforce-intelligence',
+  'platform-admin', 'intelligence-loop', 'closing',
+] as const
+
+/** Any script step the engine forgot — must be `never`. */
+type UnhandledStepId = Exclude<DemoStepId, (typeof HANDLED_STEP_IDS)[number]>
+
+// Fails to compile if any script step lacks an engine action. The [X] extends
+// [never] form is deliberate: bare `X extends never` distributes over `never`
+// and would always pass. The message names the unhandled ids.
+type ExhaustiveError = [UnhandledStepId] extends [never]
+  ? true
+  : { error: 'These demo-script steps have no case in the demo engine switch:'; missing: UnhandledStepId[] }
+const HANDLED_EXHAUSTIVE: ExhaustiveError = true
+void HANDLED_EXHAUSTIVE
 
 // Re-exported so the landing screen (task 15-c) can wire its START DEMO button
 // to the exact same reset → login → start sequence used by the app header.
@@ -245,7 +288,18 @@ export function DemoEngine() {
       const live = () => useDemoStore.getState().stepIndex === index && useDemoStore.getState().phase === 'running'
 
       switch (step.id) {
-        // 1 — Customer sends the Marathi WhatsApp request
+        // 01 — Customer App: Anita's home screen, three ways in (app / WhatsApp / voice)
+        case 'customer-request': {
+          await ensureCustomer()
+          // FIX (retained): login() resets the view, so set it AFTER ensureCustomer().
+          app.setView('customer')
+          const me = await api.get<{ ok: boolean; user: { name: string; area?: string } }>('/api/session').catch(() => null)
+          put({ searchArea: DEMO_AREA })
+          useDemoStore.getState().setNote(`${me?.user?.name ?? DEMO_SCENARIO_ENTITIES.customer} · ${DEMO_AREA}`)
+          break
+        }
+
+        // 02 — Multilingual WhatsApp request (Marathi, no app install)
         case 'wa-request': {
           const customerId = await ensureCustomer()
           app.setView('whatsapp')
@@ -254,7 +308,7 @@ export function DemoEngine() {
           break
         }
 
-        // 2 — AI understands (deep analysis of the same free text)
+        // 03 — AI understands the same free text
         case 'ai-understand': {
           // FIX: login() resets the view, so the WhatsApp view must be set AFTER
           // ensureCustomer(), otherwise the narration and the screen disagree.
@@ -265,19 +319,14 @@ export function DemoEngine() {
           break
         }
 
-        // 3 — Location obtained (one tap) → bot finds the worker
-        case 'wa-location': {
-          await ensureCustomer()
-          app.setView('whatsapp')
-          const state = await ensureReadyWaState()
-          void state
-          break
-        }
-
-        // 4 — Nearby cooperative workers searched (pipeline + #69 loading notes)
+        // 04 — Worker discovery: the bot reaches the worker card AND the matching
+        //      pipeline runs, so the screen shows the discovered workforce.
         case 'match-search': {
           await ensureCustomer()
           app.setView('whatsapp')
+          // Advance the conversation to the ready card (this is where the bot
+          // asks for Kothrud and shows the matched worker).
+          await ensureReadyWaState()
           let rot = 0
           useDemoStore.getState().setNote(rotatingNote(rot++))
           const rotation = setInterval(() => useDemoStore.getState().setNote(rotatingNote(rot++)), 600)
@@ -290,7 +339,7 @@ export function DemoEngine() {
           break
         }
 
-        // 5 — One best worker selected
+        // 05 — Fair matching: one best worker + the fair price range
         case 'match-select': {
           await ensureCustomer()
           app.setView('whatsapp')
@@ -298,28 +347,30 @@ export function DemoEngine() {
           break
         }
 
-        // 6 — Fair price calculated (federation rate card)
-        case 'fair-price': {
+        // 06 — Remote consultation overlay (deterministic simulation, no camera/mic)
+        case 'remote-consult': {
           await ensureCustomer()
           app.setView('whatsapp')
           await ensureMatch()
+          // The overlay itself is rendered by DemoVideoCall from consultOpen; the
+          // engine only has to make sure both parties exist before it opens.
+          useDemoStore.getState().setConsultOpen(true)
+          useDemoStore.getState().setNote('Remote consultation…')
           break
         }
 
-        // 7 — Customer accepts → REAL booking created, tracking opens in app
+        // 07 — WORKER ACCEPTS: the customer confirms, a real booking is created,
+        //       then the view switches to the worker's phone and he accepts.
         case 'confirm': {
-          const customerId = await ensureCustomer()
-          const { bookingRef } = await ensureBooking()
+          await ensureCustomer()
+          const { bookingRef, bookingId } = await ensureBooking()
           useAppStore.getState().openBookingByRef(bookingRef)
-          void customerId
-          qc.invalidateQueries()
-          break
-        }
 
-        // 8 — Worker accepts (switch to the matched worker's phone; poll ACCEPTED)
-        case 'worker-accept': {
+          // Now borrow the worker's phone so the ACCEPT is visibly HIS decision
+          // (spec §13 — "Workers receive relevant requests and choose whether to
+          // accept them"). Governance stays human on both sides.
           const { workerId, coopId, coopName } = await ensureWorkerIdentity()
-          const res = await api.get<{ ok: boolean; worker: { id: string; name: string; primarySkill: string; emergencyPool: boolean; cooperativeId?: string } }>(`/api/worker?id=${workerId}`)
+          const res = await api.get<{ ok: boolean; worker: { id: string; name: string; primarySkill: string; emergencyPool: boolean } }>(`/api/worker?id=${workerId}`)
           const w = res.worker
           useAppStore.getState().login({
             id: w.id,
@@ -330,17 +381,17 @@ export function DemoEngine() {
             orgId: coopId,
             orgName: coopName,
           })
-          const { bookingId } = await ensureBooking()
+          app.setView('worker')
           await pollBooking(bookingId, ['ACCEPTED', 'ON_THE_WAY', 'IN_PROGRESS', 'COMPLETED', 'PAID', 'REVIEWED'], {
             timeoutMs: 30000,
             isLive: live,
-            note: (b, s, polls) => (polls <= 1 ? 'Checking local cooperative…' : `Confirming worker acceptance… ${s}s (${b.status})`),
+            note: (b, s) => (s <= 1 ? 'Checking local cooperative…' : `Confirming worker acceptance… ${s}s (${b.status})`),
           })
           qc.invalidateQueries()
           break
         }
 
-        // 9 — Worker on the way (poll through ON_THE_WAY)
+        // 08 — SERVICE TRACKING (customer's view polls the live lifecycle)
         case 'on-the-way': {
           const { bookingId } = await ensureBooking()
           await pollBooking(bookingId, ['ON_THE_WAY', 'IN_PROGRESS', 'COMPLETED', 'PAID', 'REVIEWED'], {
@@ -351,7 +402,7 @@ export function DemoEngine() {
           break
         }
 
-        // 10 — Service completed (poll through IN_PROGRESS → COMPLETED)
+        // 09 — SERVICE COMPLETED
         case 'complete': {
           const { bookingId } = await ensureBooking()
           await pollBooking(bookingId, ['COMPLETED', 'PAID', 'REVIEWED'], {
@@ -362,57 +413,46 @@ export function DemoEngine() {
           break
         }
 
-        // 11 — Payment completed with transparent split
+        // 10 — PAYMENT + FAIRWORK LEDGER.
+        // Settles the job, then submits the two-sided trust rating. The engine
+        // NEVER rates before the job is settled: it waits for completion, pays
+        // if needed, and only then rates — that ordering is the whole point of
+        // the FairWork ledger.
         case 'payment': {
           await ensureCustomer()
           const { bookingRef, bookingId } = await ensureBooking()
           useAppStore.getState().openBookingByRef(bookingRef)
           let b = await getBooking(bookingId)
-          if (!['COMPLETED', 'PAID', 'REVIEWED'].includes(b.status)) {
+          if (['REQUESTED', 'ACCEPTED', 'ON_THE_WAY', 'IN_PROGRESS'].includes(b.status)) {
             b = await pollBooking(bookingId, ['COMPLETED', 'PAID', 'REVIEWED'], { timeoutMs: 110000, isLive: live, note: (_bb, s) => `Waiting for service completion… ${s}s` })
           }
           if (b.status === 'COMPLETED') {
             useDemoStore.getState().setNote('Settling via the cooperative payment rail…')
             const res = await api.patch<{ ok: boolean; booking: BookingDTO }>(`/api/bookings/${bookingId}`, { action: 'pay', method: 'UPI (Demo Payment)' })
             put({ payment: res.booking.payment ?? null, bookingStatus: res.booking.status, timeline: res.booking.timeline })
+            b = res.booking
           } else {
             put({ payment: b.payment ?? null })
+          }
+
+          // sub-scene 10b — the FairWork ledger's two-sided feedback
+          const review = 'Fixed the burst pipe within the hour. Very professional — will call the cooperative again.'
+          if (b.status !== 'REVIEWED') {
+            useDemoStore.getState().setNote('Submitting the two-sided trust rating…')
+            const rated = await api.patch<{ ok: boolean; booking: BookingDTO }>(`/api/bookings/${bookingId}`, {
+              action: 'rate',
+              rating: DEMO_RATING,
+              review,
+              factors: { quality: DEMO_RATING, timeliness: DEMO_RATING, behaviour: DEMO_RATING, communication: DEMO_RATING },
+            })
+            put({ rating: rated.booking.rating ?? DEMO_RATING, review, bookingStatus: rated.booking.status, timeline: rated.booking.timeline })
+          } else {
+            put({ rating: b.rating ?? DEMO_RATING, review: b.review ?? review })
           }
           qc.invalidateQueries()
           break
         }
 
-        // 12 — Multi-factor rating submitted. The engine NEVER rates before the job
-        // is settled: it waits for completion, pays if step 11 was skipped, then rates.
-        case 'rating': {
-          await ensureCustomer()
-          const { bookingId } = await ensureBooking()
-          const review = 'Fixed the burst pipe within the hour. Very professional — will call the cooperative again.'
-          let b = await getBooking(bookingId)
-          if (['REQUESTED', 'ACCEPTED', 'ON_THE_WAY', 'IN_PROGRESS'].includes(b.status)) {
-            b = await pollBooking(bookingId, ['COMPLETED', 'PAID', 'REVIEWED'], { timeoutMs: 110000, isLive: live, note: (_bb, s) => `Cooperative engine finishing the job… ${s}s` })
-          }
-          if (b.status === 'COMPLETED') {
-            useDemoStore.getState().setNote('Settling via the cooperative payment rail…')
-            const paid = await api.patch<{ ok: boolean; booking: BookingDTO }>(`/api/bookings/${bookingId}`, { action: 'pay', method: 'UPI (Demo Payment)' })
-            put({ payment: paid.booking.payment ?? null, bookingStatus: paid.booking.status, timeline: paid.booking.timeline })
-            b = paid.booking
-          }
-          if (b.status !== 'REVIEWED') {
-            useDemoStore.getState().setNote('Submitting the two-sided trust rating…')
-            const res = await api.patch<{ ok: boolean; booking: BookingDTO }>(`/api/bookings/${bookingId}`, {
-              action: 'rate',
-              rating: 5,
-              review,
-              factors: { quality: 5, timeliness: 5, behaviour: 5, communication: 5 },
-            })
-            put({ rating: res.booking.rating ?? 5, review, bookingStatus: res.booking.status, timeline: res.booking.timeline })
-          } else {
-            put({ rating: b.rating ?? 5, review: b.review ?? review })
-          }
-          qc.invalidateQueries()
-          break
-        }
 
         // 13 — Cooperative dashboard updates (drill into the matched worker's coop)
         case 'coop-update': {
@@ -457,78 +497,237 @@ export function DemoEngine() {
           break
         }
 
-        // 15 — AI detects capacity shortage (zone forecast)
-        case 'ai-shortage': {
-          useAppStore.getState().setView('ai')
+        // 12 — TALUKA COORDINATION (Haveli): local capacity + demand + AI recommendation
+        case 'taluka-capacity': {
+          const res = await signInAs<{ ok: boolean; user: DemoUser }>('TALUKA_COORD')
+          if (!res.user) throw new Error('TALUKA_COORD demo identity unavailable. Run: npm run db:seed')
+          useAppStore.getState().login(res.user)
+          useAppStore.getState().drillTo('taluka', {})
+          useDemoStore.getState().setNote('Aggregating Haveli taluka capacity…')
+          const dash = await api.get<{
+            ok: boolean
+            taluka: {
+              name: string
+              workers: number
+              availableWorkers: number
+              jobsToday: number
+              emergencyCapacity: number
+              utilizationPct: number
+              recommendation?: string
+            }
+          }>('/api/hierarchy/dashboard?level=taluka')
+          const t = dash.taluka
+          put({
+            taluka: {
+              name: t.name,
+              workers: t.workers,
+              available: t.availableWorkers,
+              jobsToday: t.jobsToday,
+              emergencyCapacity: t.emergencyCapacity,
+              utilization: t.utilizationPct,
+              recommendation: t.recommendation,
+            },
+          })
+          break
+        }
+
+        // 14 — STATE FEDERATION: network-level capacity across districts
+        case 'state-network': {
+          const res = await signInAs<{ ok: boolean; user: DemoUser }>('STATE_ADMIN')
+          if (!res.user) throw new Error('STATE_ADMIN demo identity unavailable. Run: npm run db:seed')
+          useAppStore.getState().login(res.user)
+          useAppStore.getState().drillTo('state', {})
+          useDemoStore.getState().setNote('Rolling up state-wide workforce capacity…')
+          const dash = await api.get<{
+            ok: boolean
+            federation: { name: string; districts: number; cooperatives: number; workers: number; activeWorkers: number; jobsToday: number }
+            districts: Array<{ id: string; name: string; jobsToday: number; workers: number; demand: Record<string, string> }>
+          }>('/api/hierarchy/dashboard?level=state')
+          const f = dash.federation
+          put({
+            stateFed: {
+              name: f.name,
+              districts: dash.districts?.length ?? f.districts ?? 0,
+              cooperatives: f.cooperatives,
+              workers: f.workers,
+              activeWorkers: f.activeWorkers,
+              jobsToday: f.jobsToday,
+            },
+          })
+          break
+        }
+
+        // 15 — NATIONAL APEX: the aggregated cooperative workforce network
+        case 'national-apex': {
+          const res = await signInAs<{ ok: boolean; user: DemoUser }>('NATIONAL_ADMIN')
+          if (!res.user) throw new Error('NATIONAL_ADMIN demo identity unavailable. Run: npm run db:seed')
+          useAppStore.getState().login(res.user)
+          useAppStore.getState().drillTo('national', {})
+          useDemoStore.getState().setNote('Aggregating the national cooperative network…')
+          const dash = await api.get<{
+            ok: boolean
+            national: Record<string, number | string>
+            stateFed: { id: string; name: string; region: string; workers: number } | null
+          }>('/api/hierarchy/dashboard?level=national')
+          const n = dash.national ?? {}
+          const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+          put({
+            national: {
+              states: num(n.states ?? n.statesCovered),
+              federations: num(n.federations),
+              districts: num(n.districts),
+              cooperatives: num(n.cooperatives),
+              workers: num(n.workers),
+              jobsToday: num(n.jobsToday),
+            },
+          })
+          break
+        }
+
+        // 16 — INSTITUTIONAL SERVICES (St. Mary's Boys Hostel)
+        case 'institution-amc': {
+          const res = await signInAs<{ ok: boolean; user: DemoUser }>('INSTITUTION')
+          if (!res.user) throw new Error('INSTITUTION demo identity unavailable. Run: npm run db:seed')
+          useAppStore.getState().login(res.user)
+          // The institution portal is a tab inside the customer view.
+          app.setView('customer')
+          useDemoStore.getState().setNote('Opening the institution portal…')
+          const contracts = await api.get<{ ok: boolean; contracts?: unknown[]; amc?: unknown[] }>('/api/institution').catch(() => ({ ok: false }) as { ok: boolean; contracts?: unknown[] })
+          const dueCount = Array.isArray(contracts.contracts) ? contracts.contracts.length : 0
+          put({ institution: { name: DEMO_SCENARIO_ENTITIES.institution, dueCount } })
+          break
+        }
+
+        // 17 — WORKFORCE INTELLIGENCE, with sub-scene 17A (Service Exchange) and
+        //       17B (AI Workforce Intelligence). Combines the former ai-shortage
+        //       and exchange-approve steps so the Cooperative Service Exchange is
+        //       not lost, per spec §23.
+        case 'workforce-intelligence': {
+          const { coopName } = await ensureWorkerIdentity()
+
+          // ---- 17A: capacity exchange, recommended then human-approved ----
+          useDemoStore.getState().setSubScene(0)
+          useAppStore.getState().setView('exchange')
           useDemoStore.getState().setNote('Running the demand forecast model…')
           const fc = await api.get<{
             ok: boolean
             label: string
             categories: Array<{ categoryKey: string; baseWeekend: number; expectedWeekend: number; pct: number; trend: string; drivers: string[] }>
           }>('/api/ai/forecast?zone=pune-z4')
-          // FIX: an empty category list used to throw a TypeError and break step 15.
+          // FIX (retained): an empty category list used to throw a TypeError and
+          // break the step. Fall back to an empty forecast instead.
           const plumber = fc.categories.find((c) => c.categoryKey === 'plumber') ?? fc.categories[0]
-          if (!plumber) {
-            put({ forecast: { zoneLabel: fc.label, baseWeekend: 0, expectedWeekend: 0, pct: 0, trend: 'flat', drivers: [] } })
-            break
-          }
-          put({ forecast: { zoneLabel: fc.label, baseWeekend: plumber.baseWeekend, expectedWeekend: plumber.expectedWeekend, pct: plumber.pct, trend: plumber.trend, drivers: plumber.drivers } })
-          break
-        }
+          const forecast = plumber
+            ? { zoneLabel: fc.label, baseWeekend: plumber.baseWeekend, expectedWeekend: plumber.expectedWeekend, pct: plumber.pct, trend: plumber.trend, drivers: plumber.drivers }
+            : { zoneLabel: fc.label, baseWeekend: 0, expectedWeekend: 0, pct: 0, trend: 'flat' as const, drivers: [] as string[] }
+          put({ forecast })
 
-        // 16 — Federation recommends allocation; a HUMAN approves
-        case 'exchange-approve': {
-          useAppStore.getState().setView('exchange')
-          const { coopName } = await ensureWorkerIdentity()
-          const data = d()
-          if (data.exchange?.id) {
-            if (data.exchange.status !== 'APPROVED') {
-              await api.patch('/api/exchange', { id: data.exchange.id, action: 'approve', by: 'Meera Kulkarni · Pune District Coordinator (demo)' })
-              put({ exchange: { ...data.exchange, status: 'APPROVED', approvedBy: 'Meera Kulkarni · Pune District Coordinator (demo)' } })
+          let exchange = d().exchange
+          if (exchange?.id) {
+            if (exchange.status !== 'APPROVED') {
+              await api.patch('/api/exchange', { id: exchange.id, action: 'approve', by: 'Meera Kulkarni — Pune District Coordinator (demo)' })
+              exchange = { ...exchange, status: 'APPROVED', approvedBy: 'Meera Kulkarni — Pune District Coordinator (demo)' }
+              put({ exchange })
             }
-            qc.invalidateQueries()
-            break
-          }
-          const fcst = data.forecast
-          const shortfall = fcst ? Math.max(0, fcst.expectedWeekend - fcst.baseWeekend) : 0
-          const workerCount = Math.min(6, Math.max(2, Math.ceil(shortfall / 2) || 3))
-          const expectedDemand = fcst?.expectedWeekend ?? 0
-          const pct = fcst?.pct ?? 0
-          useDemoStore.getState().setNote('Registering the recommendation…')
-          const rec = await api.post<{ ok: boolean; recommendation: { id: string } }>('/api/exchange', {
-            skill: 'plumber',
-            fromCoopName: 'Maval Pani-Puravanch Shramik Sahakari Sanstha',
-            toCoopName: coopName,
-            districtName: 'Pune',
-            workerCount,
-            distanceKm: areaDistance('Maval Market', DEMO_AREA),
-            expectedDemand,
-            durationDays: 7,
-            rationale: `Zone 4 weekend plumbing demand up ${pct}% (${fcst?.baseWeekend ?? '—'} → ${fcst?.expectedWeekend ?? '—'} jobs). Mutual-aid deputation protects emergency response time — AI recommends, humans approve.`,
-            demo: true,
-          })
-          useDemoStore.getState().setNote('Awaiting human approval…')
-          await api.patch('/api/exchange', { id: rec.recommendation.id, action: 'approve', by: 'Meera Kulkarni · Pune District Coordinator (demo)' })
-          put({
-            exchange: {
+          } else {
+            const shortfall = Math.max(0, forecast.expectedWeekend - forecast.baseWeekend)
+            const workerCount = Math.min(6, Math.max(2, Math.ceil(shortfall / 2) || 3))
+            useDemoStore.getState().setNote('Registering the capacity-exchange recommendation…')
+            const rec = await api.post<{ ok: boolean; recommendation: { id: string } }>('/api/exchange', {
+              skill: 'plumber',
+              fromCoopName: 'Maval Pani-Puravanch Shramik Sahakari Sanstha',
+              toCoopId: d().coopId,
+              toCoopName: coopName,
+              districtName: DEMO_SCENARIO_ENTITIES.district,
+              workerCount,
+              distanceKm: areaDistance('Maval Market', DEMO_AREA),
+              expectedDemand: forecast.expectedWeekend,
+              durationDays: 7,
+              rationale: `Zone 4 weekend plumbing demand up ${forecast.pct}% (${forecast.baseWeekend} → ${forecast.expectedWeekend} jobs). Mutual-aid deputation protects emergency response time — ${DEMO_GOVERNANCE}.`,
+              demo: true,
+            })
+            useDemoStore.getState().setNote('Awaiting human approval…')
+            // A HUMAN approves. Workers are never auto-transferred.
+            await api.patch('/api/exchange', { id: rec.recommendation.id, action: 'approve', by: 'Meera Kulkarni — Pune District Coordinator (demo)' })
+            exchange = {
               id: rec.recommendation.id,
               fromCoopName: 'Maval Pani-Puravanch Shramik Sahakari Sanstha',
               toCoopName: coopName,
               workerCount,
               durationDays: 7,
               distanceKm: areaDistance('Maval Market', DEMO_AREA),
-              expectedDemand,
+              expectedDemand: forecast.expectedWeekend,
               status: 'APPROVED',
-              approvedBy: 'Meera Kulkarni · Pune District Coordinator (demo)',
+              approvedBy: 'Meera Kulkarni — Pune District Coordinator (demo)',
+            }
+            put({ exchange })
+          }
+
+          // ---- 17B: AI workforce intelligence ----
+          useDemoStore.getState().setSubScene(1)
+          useDemoStore.getState().setNote('Aggregating skill-gap and allocation signals…')
+          const gap = await api
+            .get<{ ok: boolean; totalGap?: number }>(`/api/skill-gaps?district=${DEMO_SCENARIO_ENTITIES.district}`)
+            .catch(() => ({ ok: false }) as { ok: boolean; totalGap?: number })
+          put({ subSceneId: 'intelligence' })
+          useAppStore.getState().setView('ai')
+          qc.invalidateQueries()
+          break
+        }
+
+        // Supporting scene — PLATFORM ADMIN (spec §24: deliberately unnumbered)
+        case 'platform-admin': {
+          const res = await signInAs<{ ok: boolean; user: DemoUser }>('PLATFORM_ADMIN')
+          if (!res.user) throw new Error('PLATFORM_ADMIN demo identity unavailable. Run: npm run db:seed')
+          useAppStore.getState().login(res.user)
+          useAppStore.getState().setView('platform')
+          useDemoStore.getState().setNote('System-wide operational visibility…')
+          type AdminOps = {
+            ok: boolean
+            counts?: { workers?: number; cooperatives?: number; bookings?: number; openComplaints?: number }
+          }
+          const ops = await api.get<AdminOps>('/api/admin').catch((): AdminOps => ({ ok: false }))
+          const c = ops.counts ?? {}
+          put({
+            platform: {
+              workers: c.workers ?? 0,
+              cooperatives: c.cooperatives ?? 0,
+              bookings: c.bookings ?? 0,
+              openComplaints: c.openComplaints ?? 0,
             },
           })
           qc.invalidateQueries()
           break
         }
 
+        // Supporting scene — COMPLETE INTELLIGENCE LOOP (spec §25)
+        case 'intelligence-loop': {
+          app.setView('ai')
+          useDemoStore.getState().setNote('Every service feeds the next forecast…')
+          // Warm the forecast so the closing scene shows a real number.
+          const fc = await api.get<{ ok: boolean; label: string; categories: Array<{ categoryKey: string; baseWeekend: number; expectedWeekend: number; pct: number; trend: string; drivers: string[] }> }>('/api/ai/forecast?zone=pune-z4').catch(() => null)
+          const plumber = fc?.categories?.find((c) => c.categoryKey === 'plumber') ?? fc?.categories?.[0]
+          if (plumber && fc) {
+            put({ forecast: { zoneLabel: fc.label, baseWeekend: plumber.baseWeekend, expectedWeekend: plumber.expectedWeekend, pct: plumber.pct, trend: plumber.trend, drivers: plumber.drivers } })
+          }
+          break
+        }
+
+        // Supporting scene — CLOSING CARD (spec §26)
+        case 'closing': {
+          useDemoStore.getState().setNote('')
+          break
+        }
+
         default:
-          throw new Error(`Unknown demo step: ${step.id}`)
+          // Spec §41 — the demo must NEVER get stuck. An unhandled step is
+          // logged and skipped rather than thrown, so a single bad step cannot
+          // abort a live recording. The exhaustive-case guard below is what
+          // catches drift at build time instead.
+          console.warn(`[gigsetu-demo] no action for step "${step.id}" — continuing`)
+          break
       }
+
     },
     [ensureBooking, ensureCustomer, ensureMatch, ensureReadyWaState, ensureWorkerIdentity, getBooking, pollBooking, qc]
   )
